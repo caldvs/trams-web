@@ -219,3 +219,5 @@ body.is-map .updated { display: none; }
 .livemap__info b { font-size: 17px; border-left: 4px solid var(--c); padding-left: 8px; }
 .livemap__info a { color: var(--accent); text-decoration: none; font-weight: 600; margin-top: 4px; }
 .livemap__note { margin: 6px 4px 0; color: var(--muted); font-size: 11px; }
+.map .tram { pointer-events: none; }
+.map .tram rect, .map .tram path { fill: var(--c); stroke: var(--card); stroke-width: 1.2px; }

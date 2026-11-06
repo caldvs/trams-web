@@ -410,3 +410,82 @@ export function trackPoint(graph, tram, t) {
   }
   return { p: path[path.length - 1], angle: 0 };
 }
+
+// ---------- tracking trams between refreshes ----------
+
+// Keeps each tram's identity across refreshes and eases it towards its estimated position, so maps
+// can draw it gliding along the track. `p` is in metres (toXY), `angle` in radians (0 = east, CCW).
+export function createTracker(graph) {
+  let times = new Map();
+  let history = new Map();
+  let trams = [];
+  let nextId = 1;
+  let last = 0;
+  return {
+    graph,
+    get trams() {
+      return trams;
+    },
+    update(rows) {
+      if (!rows?.length) return;
+      // Waits are relative to when TfGM made the data, if that's recent.
+      const stamp = Math.max(...rows.map((m) => Date.parse(m.LastUpdated) || 0));
+      const now = Math.abs(Date.now() - stamp) < 120_000 ? stamp : Date.now();
+      times = travelTimes(graph, rows, times);
+      const found = inferTrams(graph, rows, { now, times, history });
+      history = boardHistory(graph, rows);
+      const old = new Set(trams);
+      const next = [];
+      for (const data of found) {
+        const { p, angle } = trackPoint(graph, data, Date.now());
+        let match = null;
+        let bestD = 700;
+        for (const t of old) {
+          if (t.data.dest !== data.dest) continue;
+          const d = dist(t.p, p);
+          if (d < bestD) [match, bestD] = [t, d];
+        }
+        if (match) {
+          old.delete(match);
+          // Whole-minute waits can put a tram later than last time; on the same stretch, keep the
+          // earlier estimate so it never slides backwards (a late tram waits at the stop instead).
+          if (match.data.from === data.from && match.data.to === data.to)
+            data.arriveAt = Math.min(data.arriveAt, match.data.arriveAt);
+          match.data = data;
+          next.push(match);
+        } else next.push({ id: nextId++, data, p, angle });
+      }
+      trams = next;
+    },
+    // Move every tram a frame's worth towards where it should be now.
+    step() {
+      const ts = performance.now();
+      const dt = Math.min(1000, ts - last);
+      last = ts;
+      const now = Date.now();
+      for (const t of trams) {
+        const { p, angle } = trackPoint(graph, t.data, now);
+        const gap = dist(p, t.p);
+        const k = gap > 800 ? 1 : Math.min(1, dt / 500); // ease towards new estimates; jump if far off
+        t.p = [t.p[0] + (p[0] - t.p[0]) * k, t.p[1] + (p[1] - t.p[1]) * k];
+        t.angle = angle;
+      }
+    },
+  };
+}
+
+// SVG for one tram, about 13 px long (20 for a double), pointing along +x. Place it with
+// tramTransform().
+export function tramShape(data, colour) {
+  const len = data.double ? 20 : 13;
+  return `<rect x="${-len / 2}" y="-3.2" width="${len}" height="6.4" rx="3.2" style="--c:${colour}"/>
+    <path d="M${len / 2 - 1} -2.4L${len / 2 + 4} 0L${len / 2 - 1} 2.4Z" style="--c:${colour}"/>`;
+}
+
+// Transform for a tram at screen point [x, y] (y down) heading `angle`, nudged `off` screen units to
+// the left of its track (Metrolink runs on the left), so opposite directions don't overlap.
+export function tramTransform([x, y], angle, scale, off) {
+  const sx = x - Math.sin(angle) * off;
+  const sy = y - Math.cos(angle) * off;
+  return `translate(${sx.toFixed(1)} ${sy.toFixed(1)}) rotate(${((-angle * 180) / Math.PI).toFixed(1)}) scale(${scale})`;
+}

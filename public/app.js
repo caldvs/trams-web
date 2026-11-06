@@ -1,4 +1,5 @@
 // Web port of the trams iOS app: stop list -> stop detail, from /api/metrolinks.
+import { buildGraph, createTracker, toLonLat, tramShape, tramTransform } from "./live.js";
 import { createLiveMap } from "./map-view.js";
 
 const REFRESH_MS = 30_000;
@@ -293,10 +294,11 @@ function miniMap(here, near, stations) {
     .join("");
 
   const you = `<g class="you" transform="translate(${MAP_W / 2} ${MAP_H / 2})"><circle r="14" class="you__halo"/><circle r="6"/></g>`;
+  homeMap = { px, size: 0.85 };
 
   return `<figure class="map">
     <svg viewBox="0 0 ${MAP_W} ${MAP_H}" role="img" aria-label="Map of tram stops near you">
-      ${roads}<g class="tracks">${tracks}</g>${dots}${you}${scale}
+      ${roads}<g class="tracks">${tracks}</g>${dots}<g class="minitrams"></g>${you}${scale}
     </svg>
     <figcaption>© OpenStreetMap contributors · Contains TfGM data · © Crown copyright 2017</figcaption>
   </figure>`;
@@ -342,6 +344,7 @@ function farView(here, [nearest, km], stations) {
     })
     .join("");
 
+  homeMap = { px, size: 0.5 };
   const [nx, ny] = px(...state.stops[nearest]);
   const [ux, uy] = px(...here);
 
@@ -383,7 +386,7 @@ function farView(here, [nearest, km], stations) {
   const directions = `https://www.google.com/maps/dir/?api=1&origin=${here[0]},${here[1]}&destination=${slat},${slon}&travelmode=transit`;
   return `<figure class="map">
     <svg viewBox="0 0 ${MAP_W} ${MAP_H}" role="img" aria-label="The Metrolink network, where you are, and the nearest stop">
-      <g class="tracks">${tracks}</g>${dots}${you}${nearDot}
+      <g class="tracks">${tracks}</g>${dots}<g class="minitrams"></g>${you}${nearDot}
     </svg>
     <figcaption>Contains TfGM data · © Crown copyright 2017</figcaption>
   </figure>
@@ -490,9 +493,58 @@ function route() {
 }
 const onMap = () => location.hash === "#/map";
 
+// ---------- trams on the home page map ----------
+
+let homeMap = null; // { px: (lat, lon) -> [x, y], size } for the map last drawn on the home page
+const homeTrams = new Map(); // tram id -> <g>
+let homeLayer = null;
+function animateHomeTrams() {
+  requestAnimationFrame(animateHomeTrams);
+  const layer = document.querySelector(".map .minitrams");
+  if (!layer || !tracker || !homeMap) return;
+  if (layer !== homeLayer) {
+    // The list was redrawn: start a fresh set of elements in the new map.
+    homeLayer = layer;
+    homeTrams.clear();
+  }
+  tracker.step();
+  const seen = new Set();
+  for (const t of tracker.trams) {
+    seen.add(t.id);
+    const [lon, lat] = toLonLat(t.p);
+    const p = homeMap.px(lat, lon);
+    let g = homeTrams.get(t.id);
+    const off = p[0] < -30 || p[0] > MAP_W + 30 || p[1] < -30 || p[1] > MAP_H + 30;
+    if (off) {
+      g?.remove();
+      homeTrams.delete(t.id);
+      continue;
+    }
+    if (!g) {
+      g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.setAttribute("class", "tram");
+      layer.append(g);
+      homeTrams.set(t.id, g);
+    }
+    const look = `${t.data.dest}|${t.data.double}`;
+    if (g.dataset.look !== look) {
+      g.dataset.look = look;
+      g.innerHTML = `<title>To ${esc(t.data.dest)}</title>${tramShape(t.data, colourFor(t.data.dest))}`;
+    }
+    g.setAttribute("transform", tramTransform(p, t.angle, homeMap.size, 4 * homeMap.size));
+  }
+  for (const [id, g] of homeTrams)
+    if (!seen.has(id)) {
+      g.remove();
+      homeTrams.delete(id);
+    }
+}
+requestAnimationFrame(animateHomeTrams);
+
 // ---------- live map page ----------
 
 let liveMap = null;
+let tracker = null; // trams worked out from the boards, shared by both maps (see live.js)
 function colourFor(name) {
   const stations = byStation();
   const key = norm(name);
@@ -500,12 +552,12 @@ function colourFor(name) {
   return "#8e8e93";
 }
 function renderMap() {
-  if (!state.net) return (app.innerHTML = `<p class="empty">Loading map…</p>`);
+  if (!tracker) return (app.innerHTML = `<p class="empty">Loading map…</p>`);
   if (!liveMap) {
     app.innerHTML = "";
-    liveMap = createLiveMap(app, { net: state.net, colourFor });
+    liveMap = createLiveMap(app, { net: state.net, colourFor, tracker });
   }
-  liveMap.update(state.rows);
+  liveMap.update();
   liveMap.setHere(state.here);
 }
 
@@ -548,6 +600,7 @@ async function load() {
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !Array.isArray(body.value)) throw new Error(body.error ?? `Server answered ${res.status}`);
     state.rows = body.value;
+    tracker?.update(state.rows);
     state.stale = Boolean(body.stale);
     state.error = null;
     state.fetchedAt = new Date();
@@ -681,7 +734,9 @@ fetch("network.json")
     state.stops = net.stops;
     state.tracks = net.tracks;
     state.net = net;
-    if (state.here || onMap()) render();
+    tracker = createTracker(buildGraph(net));
+    tracker.update(state.rows);
+    render();
   })
   .catch(() => {});
 render();

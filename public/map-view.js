@@ -1,6 +1,6 @@
 // The live map page: the whole network, pan and zoom, and trams animated along the track at the
 // positions live.js works out from the departure boards.
-import { boardHistory, buildGraph, inferTrams, toXY, trackPoint, travelTimes } from "./live.js";
+import { toXY, tramShape, tramTransform } from "./live.js";
 
 const MIN_W = 600; // metres across, zoomed right in…
 const MAX_W = 45_000; // …and right out
@@ -19,8 +19,8 @@ const el = (name, attrs = {}) => {
 };
 const escapeText = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
-export function createLiveMap(root, { net, colourFor, onStop }) {
-  const graph = buildGraph(net);
+// `tracker` (live.js createTracker) is shared with the home page map and updated by the app.
+export function createLiveMap(root, { net, colourFor, tracker }) {
   // Local coordinates in metres, x east and y south (SVG's way up), centred on St Peter's Square.
   const [ox, oy] = toXY([net.stops["St Peter's Square"][1], net.stops["St Peter's Square"][0]]);
   const local = ([x, y]) => [x - ox, oy - y];
@@ -162,87 +162,54 @@ export function createLiveMap(root, { net, colourFor, onStop }) {
   }
 
   // ---------- trams ----------
-  let times = new Map();
-  let history = new Map();
-  let trams = []; // { id, data, el, shown: [x, y], angle }
-  let nextId = 1;
+  const els = new Map(); // tram id -> <g>
   let selected = null;
 
-  function update(rows) {
-    if (!rows?.length) return;
-    // Waits are relative to when TfGM made the data, if that's recent.
-    const stamp = Math.max(...rows.map((m) => Date.parse(m.LastUpdated) || 0));
-    const now = Math.abs(Date.now() - stamp) < 120_000 ? stamp : Date.now();
-    times = travelTimes(graph, rows, times);
-    const found = inferTrams(graph, rows, { now, times, history });
-    history = boardHistory(graph, rows);
-
-    // Keep each tram's identity across refreshes, so it glides instead of jumping.
-    const old = new Set(trams);
-    const next = [];
-    for (const data of found) {
-      const target = local(trackPoint(graph, data, Date.now()).p);
-      let match = null;
-      let bestD = 700;
-      for (const t of old) {
-        if (t.data.dest !== data.dest) continue;
-        const d = Math.hypot(t.shown[0] - target[0], t.shown[1] - target[1]);
-        if (d < bestD) [match, bestD] = [t, d];
+  // Call after tracker.update(): adds and removes trams to match.
+  function update() {
+    const trams = tracker.trams;
+    const ids = new Set(trams.map((t) => t.id));
+    for (const [id, g] of els)
+      if (!ids.has(id)) {
+        g.remove();
+        els.delete(id);
       }
-      if (match) {
-        old.delete(match);
-        match.data = data;
-        next.push(match);
-      } else {
-        const t = { id: nextId++, data, shown: target, angle: 0, el: el("g", { class: "lm-tram is-new" }) };
-        t.el.dataset.id = t.id;
-        layer("trams").append(t.el);
-        next.push(t);
-      }
-    }
-    for (const t of old) t.el.remove();
-    trams = next;
     for (const t of trams) {
-      const len = t.data.double ? 20 : 13;
-      t.el.innerHTML = `<rect x="${-len / 2}" y="-3.2" width="${len}" height="6.4" rx="3.2" style="--c:${colourFor(t.data.dest)}"/>
-        <path d="M${len / 2 - 1} -2.4L${len / 2 + 4} 0L${len / 2 - 1} 2.4Z" style="--c:${colourFor(t.data.dest)}"/>`;
-      t.el.classList.toggle("is-selected", t.id === selected);
+      let g = els.get(t.id);
+      if (!g) {
+        g = el("g", { class: "lm-tram is-new" });
+        g.dataset.id = t.id;
+        layer("trams").append(g);
+        els.set(t.id, g);
+      }
+      g.innerHTML = tramShape(t.data, colourFor(t.data.dest));
+      g.classList.toggle("is-selected", t.id === selected);
     }
-    if (selected && !trams.some((t) => t.id === selected)) select(null);
+    if (selected && !ids.has(selected)) select(null);
     status.textContent = trams.length ? `${trams.length} trams` : "No trams running right now";
     showInfo();
   }
 
   let raf = 0;
-  let last = performance.now();
-  function frame(ts) {
-    const dt = Math.min(1000, ts - last);
-    last = ts;
+  function frame() {
+    tracker.step();
     const s = inv();
-    const now = Date.now();
-    for (const t of trams) {
-      const { p, angle } = trackPoint(graph, t.data, now);
-      // Metrolink runs on the left: nudge each tram to the left of its track so opposite
-      // directions don't sit on top of each other.
-      const off = 4.5 * s;
-      const target = local([p[0] - Math.sin(angle) * off, p[1] + Math.cos(angle) * off]);
-      const gap = Math.hypot(target[0] - t.shown[0], target[1] - t.shown[1]);
-      const k = gap > 800 ? 1 : Math.min(1, dt / 500); // ease towards new estimates; jump if far off
-      t.shown = [t.shown[0] + (target[0] - t.shown[0]) * k, t.shown[1] + (target[1] - t.shown[1]) * k];
-      t.angle = (-angle * 180) / Math.PI;
-      t.el.setAttribute("transform", `translate(${t.shown[0].toFixed(1)} ${t.shown[1].toFixed(1)}) rotate(${t.angle.toFixed(1)}) scale(${s})`);
-      t.el.classList.remove("is-new");
+    for (const t of tracker.trams) {
+      const g = els.get(t.id);
+      if (!g) continue;
+      g.setAttribute("transform", tramTransform(local(t.p), t.angle, s, 4.5 * s));
+      g.classList.remove("is-new");
     }
     raf = requestAnimationFrame(frame);
   }
 
   function select(id) {
     selected = id;
-    for (const t of trams) t.el.classList.toggle("is-selected", t.id === id);
+    for (const [tid, g] of els) g.classList.toggle("is-selected", tid === id);
     showInfo();
   }
   function showInfo() {
-    const t = trams.find((x) => x.id === selected);
+    const t = tracker.trams.find((x) => x.id === selected);
     info.hidden = !t;
     if (!t) return;
     const mins = Math.max(0, Math.round((t.data.arriveAt - Date.now()) / 60_000));

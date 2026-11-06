@@ -44,6 +44,7 @@ A copy is stored as the `TFGM_KEY` Actions secret in `caldvs/metrolink-performan
   - travel time between stops comes from the boards themselves (the same tram's wait at neighbouring stops), or from the track length;
   - boards keep showing "Departing" long after the last tram has gone, so a tram is only shown at a stop if the next stop's board also lists it;
   - between refreshes each tram glides towards where it should be by its arrival time. Tap one to see where it's going and its next stop.
+  - the trams also appear on the home page's nearest-stops map (and the whole-network view when you're far away). Both maps share one tracker, which keeps each tram's identity across refreshes and never moves it backwards along the track.
 - The server gzips text over 1 KB, so a live refresh is about 8 KB instead of 145 KB.
 
 ## Map data

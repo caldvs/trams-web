@@ -158,6 +158,59 @@ function stopRow(name, platforms, extra = "") {
 const MAP_W = 360;
 const MAP_H = 220;
 
+// Roads come from OpenStreetMap, pre-cut into squares of 0.02° lat x 0.032° lon (about 2 km) in
+// public/roads/<latIndex>_<lonIndex>.json. Each road is [class, lon, lat, dLon, dLat, ...] in 1e-5 degrees.
+// Classes: 0 motorway, 1 trunk, 2 primary, 3 secondary, 4 tertiary, 5 residential/minor, 6 pedestrian.
+const TILE_LAT = 0.02;
+const TILE_LON = 0.032;
+const MINOR_ROADS_UNDER_KM = 1.6; // hide residential streets when zoomed further out than this
+const roadTiles = new Map(); // key -> roads[] once loaded, or null while loading / missing
+
+function roadTile(key) {
+  if (roadTiles.has(key)) return roadTiles.get(key);
+  roadTiles.set(key, null);
+  fetch(`roads/${key}.json`)
+    .then((r) => (r.ok ? r.json() : []))
+    .then((roads) => {
+      roadTiles.set(key, roads);
+      if (state.here && !route()) render();
+    })
+    .catch(() => roadTiles.set(key, []));
+  return null;
+}
+
+function roadPaths(lat0, lon0, k, cos0, radiusKm) {
+  const dLat = MAP_H / 2 / k / 110.574;
+  const dLon = MAP_W / 2 / k / (111.32 * cos0);
+  // A road crossing squares is in each of them and gets drawn twice; that looks the same.
+  const byClass = [[], [], [], [], [], [], []];
+  for (let i = Math.floor((lat0 - dLat) / TILE_LAT); i <= Math.floor((lat0 + dLat) / TILE_LAT); i++)
+    for (let j = Math.floor((lon0 - dLon) / TILE_LON); j <= Math.floor((lon0 + dLon) / TILE_LON); j++) {
+      for (const road of roadTile(`${i}_${j}`) ?? []) {
+        const cls = road[0];
+        if (cls >= 5 && radiusKm > MINOR_ROADS_UNDER_KM) continue;
+        let lon = road[1];
+        let lat = road[2];
+        let d = "";
+        for (let n = 1; n < road.length; n += 2) {
+          if (n > 1) {
+            lon += road[n];
+            lat += road[n + 1];
+          }
+          const x = MAP_W / 2 + (lon / 1e5 - lon0) * 111.32 * cos0 * k;
+          const y = MAP_H / 2 - (lat / 1e5 - lat0) * 110.574 * k;
+          d += `${n === 1 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+        }
+        byClass[cls].push(d);
+      }
+    }
+  // Minor roads first so major roads draw on top.
+  return [6, 5, 4, 3, 2, 1, 0]
+    .filter((c) => byClass[c].length)
+    .map((c) => `<path class="road road--${c}" d="${byClass[c].join("")}"/>`)
+    .join("");
+}
+
 function miniMap(here, near, stations) {
   if (!near.length) return "";
   const [lat0, lon0] = here;
@@ -167,6 +220,8 @@ function miniMap(here, near, stations) {
   const cos0 = Math.cos((lat0 * Math.PI) / 180);
   const px = (lat, lon) => [MAP_W / 2 + (lon - lon0) * 111.32 * cos0 * k, MAP_H / 2 - (lat - lat0) * 110.574 * k];
   const inside = ([x, y], m = 0) => x >= -m && x <= MAP_W + m && y >= -m && y <= MAP_H + m;
+
+  const roads = roadPaths(lat0, lon0, k, cos0, radiusKm);
 
   const tracks = state.tracks
     .map((t) => t.map(([lon, lat]) => px(lat, lon)))
@@ -222,9 +277,9 @@ function miniMap(here, near, stations) {
 
   return `<figure class="map">
     <svg viewBox="0 0 ${MAP_W} ${MAP_H}" role="img" aria-label="Map of tram stops near you">
-      <g class="tracks">${tracks}</g>${dots}${you}${scale}
+      <g class="roads">${roads}</g><g class="tracks">${tracks}</g>${dots}${you}${scale}
     </svg>
-    <figcaption>Contains TfGM data · © Crown copyright 2017</figcaption>
+    <figcaption>© OpenStreetMap contributors · Contains TfGM data · © Crown copyright 2017</figcaption>
   </figure>`;
 }
 

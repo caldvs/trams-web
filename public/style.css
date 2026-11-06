@@ -10,7 +10,9 @@
   --late: #c93400;
   --msg-bg: #fff4e0;
   --star: #c78a00;
-  --track: #d1d1d6;
+  --track: #f0b400;
+  --road: #e5e5ea;
+  --road-major: #d1d1d6;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -25,7 +27,9 @@
     --late: #ff9f0a;
     --msg-bg: #2f2410;
     --star: #ffcc00;
-    --track: #48484a;
+    --track: #c99700;
+    --road: #2c2c2e;
+    --road-major: #3a3a3c;
   }
 }
 
@@ -113,7 +117,15 @@ body {
 .map { margin: 0 0 8px; }
 .map svg { display: block; width: 100%; height: auto; background: var(--card); border-radius: 12px; }
 .map figcaption { margin: 4px 4px 0; color: var(--muted); font-size: 10px; text-align: right; }
-.map .tracks path { fill: none; stroke: var(--track); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+.map .road { fill: none; stroke: var(--road); stroke-linecap: round; stroke-linejoin: round; }
+.map .road--6 { stroke-width: 1; stroke-dasharray: 2 2; }
+.map .road--5 { stroke-width: 1.2; }
+.map .road--4 { stroke-width: 2; }
+.map .road--3 { stroke-width: 2.4; }
+.map .road--2 { stroke-width: 3; stroke: var(--road-major); }
+.map .road--1 { stroke-width: 3.6; stroke: var(--road-major); }
+.map .road--0 { stroke-width: 4.2; stroke: var(--road-major); }
+.map .tracks path { fill: none; stroke: var(--track); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .map .stop { fill: var(--card); stroke: var(--c); stroke-width: 3; }
 .map a:hover .stop, .map a:focus .stop { fill: var(--c); }
 .map text {

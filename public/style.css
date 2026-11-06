@@ -146,3 +146,17 @@ body {
 .btn { margin-top: 8px; padding: 10px 20px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
 .updated { text-align: center; color: var(--muted); font-size: 12px; padding-top: 12px; }
 .updated.is-warn { color: var(--soon); font-weight: 600; }
+
+.map .stop--tiny { fill: var(--c); stroke: none; }
+.map .you path { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.map text.you__label { font-size: 11.5px; font-weight: 700; fill: var(--accent); }
+.far { margin: 0 4px 10px; font-size: 15px; }
+.far a { color: var(--accent); }
+.far__go {
+  display: block; margin-top: 10px; padding: 12px 14px; border-radius: 12px;
+  background: var(--card); font-weight: 600; text-decoration: none;
+}
+.map .roads--wide .road--2 { stroke-width: 1.6; }
+.map .roads--wide .road--1 { stroke-width: 2.1; }
+.map .roads--wide .road--0 { stroke-width: 2.6; }
+.map .far__line { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: 4 4; stroke-linecap: round; }

@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 // Local dev: TFGM_API_KEY can live in .env (gitignored). Real env vars win.
 const envFile = fileURLToPath(new URL("./.env", import.meta.url));
@@ -71,8 +72,15 @@ async function metrolinks() {
   }
 }
 
+// Text over 1 KB is gzipped when the browser accepts it (the map's road squares shrink to about a third).
 function send(res, status, body, type = types[".json"]) {
-  res.writeHead(status, { "content-type": type, "cache-control": "no-store" });
+  const headers = { "content-type": type, "cache-control": "no-store", vary: "accept-encoding" };
+  const textual = /^(text\/|application\/json|image\/svg)/.test(type);
+  if (textual && body.length > 1024 && /\bgzip\b/.test(res.req.headers["accept-encoding"] ?? "")) {
+    body = gzipSync(body);
+    headers["content-encoding"] = "gzip";
+  }
+  res.writeHead(status, headers);
   res.end(body);
 }
 

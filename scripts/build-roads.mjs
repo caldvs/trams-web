@@ -54,3 +54,18 @@ for (const [key, list] of tiles) {
   writeFileSync(new URL(`${key}.json`, dir), json);
 }
 console.log(`${roads} roads in ${tiles.size} squares, ${Math.round(bytes / 1024)} KB`);
+
+// main.json: motorways, trunk and primary roads only (no slip roads) across the whole area,
+// simplified to 10 m. The map uses it when zoomed out past the squares' range.
+const main = [];
+for (const way of osm.elements) {
+  const cls = CLASS[way.tags?.highway];
+  if (cls === undefined || cls > 2 || way.tags.highway.endsWith("_link") || !way.geometry?.length) continue;
+  const pts = simplify(way.geometry.map((p) => [p.lon, p.lat]), 10).map(([lon, lat]) => [Math.round(lon * 1e5), Math.round(lat * 1e5)]);
+  const road = [cls, ...pts[0]];
+  for (let i = 1; i < pts.length; i++) road.push(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  main.push(road);
+}
+const mainJson = JSON.stringify(main);
+writeFileSync(new URL("main.json", dir), mainJson);
+console.log(`main.json: ${main.length} main roads, ${Math.round(mainJson.length / 1024)} KB`);

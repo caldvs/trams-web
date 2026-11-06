@@ -34,14 +34,18 @@ A copy is stored as the `TFGM_KEY` Actions secret in `caldvs/metrolink-performan
   - strips the signs' control codes (`^F0`, `^J`) from notices, and hides the standing "Welcome to Metrolink" notice
   - warns when TfGM's own timestamp is over 3 minutes old
   - keeps saved stops in this browser (`localStorage`)
-  - can show the 3 stops nearest to you, with a small map drawn as SVG (no third-party map tiles): roads, the track in Metrolink yellow, nearby stops in their area's colour, you, and a scale bar. Residential streets only show when zoomed in to under 1.6 km. Tapping a stop opens it.
+  - shows the 3 stops nearest to you, with a small map drawn as SVG (no third-party map tiles): roads, the track in Metrolink yellow, stops in their area's colour, you, and a scale bar. Tapping a stop opens it.
+    - The map covers 1 km around you. If the nearest stop is further, it zooms out just enough to include it, using main roads only beyond 2.5 km.
+    - More than 10 km from every stop, it shows the whole network instead: you and a dashed line to the nearest stop, or an arrow at the edge if you're over 60 km away. It also says which way the stop is, with a link to directions on Google Maps.
+    - After you share your location once, the page finds you by itself on later visits (or straight away if the browser already allows it) and updates your position every 30 s while the tab is open.
+- The server gzips text over 1 KB, so a live refresh is about 8 KB instead of 145 KB.
 
 ## Map data
 
 Both are built by scripts in `scripts/`; see the comment at the top of each for the download command.
 
 - `public/network.json` (16 KB): each stop's coordinates and simplified track, from TfGM's [GM Metrolink Network](https://www.data.gov.uk/dataset/55576216-cd1d-4e2b-adcf-c87c07473373/gm-metrolink-network) data (June 2026, the GeoJSON in `GM_Metrolink_MapData.zip`). Stops are matched to the live feed on `stationCode` = `TLAREF`, and by name for Deansgate - Castlefield (`GMX` in the feed). The track is simplified to within 4 m. Rebuild it with `scripts/build-network.mjs` when TfGM publishes a new network.
-- `public/roads/` (132 files, 1.4 MB in total, 11 KB each on average): OpenStreetMap roads within 2.5 km of a stop, simplified to within 3 m and cut into squares about 2 km across, so a map view downloads only 2–6 of them. Rebuild with `scripts/build-roads.mjs`, after `network.json`.
+- `public/roads/`: OpenStreetMap roads within 2.5 km of a stop, simplified to within 3 m and cut into 132 squares about 2 km across (1.4 MB in total, 11 KB each on average), so a close-up map downloads only 2–6 of them. `roads/main.json` (220 KB, 80 KB gzipped) has just the motorways and A-roads, for wider views. Rebuild both with `scripts/build-roads.mjs`, after `network.json`.
 
 ## Licence
 

@@ -164,7 +164,8 @@ const MAP_H = 220;
 const TILE_LAT = 0.02;
 const TILE_LON = 0.032;
 const MINOR_ROADS_UNDER_KM = 1.6; // hide residential streets when zoomed further out than this
-const roadTiles = new Map(); // key -> roads[] once loaded, or null while loading / missing
+const TILED_ROADS_UNDER_KM = 2.5; // past this, use roads/main.json (main roads only) instead of the squares
+const roadTiles = new Map(); // key ("main" or a square) -> roads[] once loaded, or null while loading / missing
 
 function roadTile(key) {
   if (roadTiles.has(key)) return roadTiles.get(key);
@@ -182,40 +183,50 @@ function roadTile(key) {
 function roadPaths(lat0, lon0, k, cos0, radiusKm) {
   const dLat = MAP_H / 2 / k / 110.574;
   const dLon = MAP_W / 2 / k / (111.32 * cos0);
+  const wide = radiusKm > TILED_ROADS_UNDER_KM;
+  const sources = [];
+  if (wide) sources.push(roadTile("main"));
+  else
+    for (let i = Math.floor((lat0 - dLat) / TILE_LAT); i <= Math.floor((lat0 + dLat) / TILE_LAT); i++)
+      for (let j = Math.floor((lon0 - dLon) / TILE_LON); j <= Math.floor((lon0 + dLon) / TILE_LON); j++)
+        sources.push(roadTile(`${i}_${j}`));
   // A road crossing squares is in each of them and gets drawn twice; that looks the same.
   const byClass = [[], [], [], [], [], [], []];
-  for (let i = Math.floor((lat0 - dLat) / TILE_LAT); i <= Math.floor((lat0 + dLat) / TILE_LAT); i++)
-    for (let j = Math.floor((lon0 - dLon) / TILE_LON); j <= Math.floor((lon0 + dLon) / TILE_LON); j++) {
-      for (const road of roadTile(`${i}_${j}`) ?? []) {
-        const cls = road[0];
-        if (cls >= 5 && radiusKm > MINOR_ROADS_UNDER_KM) continue;
-        let lon = road[1];
-        let lat = road[2];
-        let d = "";
-        for (let n = 1; n < road.length; n += 2) {
-          if (n > 1) {
-            lon += road[n];
-            lat += road[n + 1];
-          }
-          const x = MAP_W / 2 + (lon / 1e5 - lon0) * 111.32 * cos0 * k;
-          const y = MAP_H / 2 - (lat / 1e5 - lat0) * 110.574 * k;
-          d += `${n === 1 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+  for (const source of sources) {
+    for (const road of source ?? []) {
+      const cls = road[0];
+      if (cls >= 5 && radiusKm > MINOR_ROADS_UNDER_KM) continue;
+      let lon = road[1];
+      let lat = road[2];
+      let d = "";
+      for (let n = 1; n < road.length; n += 2) {
+        if (n > 1) {
+          lon += road[n];
+          lat += road[n + 1];
         }
-        byClass[cls].push(d);
+        const x = MAP_W / 2 + (lon / 1e5 - lon0) * 111.32 * cos0 * k;
+        const y = MAP_H / 2 - (lat / 1e5 - lat0) * 110.574 * k;
+        d += `${n === 1 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
       }
+      byClass[cls].push(d);
     }
+  }
   // Minor roads first so major roads draw on top.
-  return [6, 5, 4, 3, 2, 1, 0]
+  const paths = [6, 5, 4, 3, 2, 1, 0]
     .filter((c) => byClass[c].length)
     .map((c) => `<path class="road road--${c}" d="${byClass[c].join("")}"/>`)
     .join("");
+  return `<g class="roads ${wide ? "roads--wide" : ""}">${paths}</g>`;
 }
+
+const MAP_RADIUS_KM = 1; // the map shows this far around you (half its height)…
+const FAR_KM = 10; // …unless the nearest stop is further; beyond this, show the network overview instead
 
 function miniMap(here, near, stations) {
   if (!near.length) return "";
   const [lat0, lon0] = here;
-  // Show at least the nearest stops, but stay between 400 m and 3 km across half the height.
-  const radiusKm = Math.min(3, Math.max(0.4, near[near.length - 1][1] * 1.3));
+  // 1 km around you; if the nearest stop is further, zoom out just enough to include it.
+  const radiusKm = Math.max(MAP_RADIUS_KM, near[0][1] * 1.15);
   const k = MAP_H / 2 / radiusKm; // px per km
   const cos0 = Math.cos((lat0 * Math.PI) / 180);
   const px = (lat, lon) => [MAP_W / 2 + (lon - lon0) * 111.32 * cos0 * k, MAP_H / 2 - (lat - lat0) * 110.574 * k];
@@ -236,7 +247,19 @@ function miniMap(here, near, stations) {
     // Label the nearest stops first so they win any overlap.
     .sort((a, b) => b.near - a.near);
 
-  const taken = [];
+  // Scale bar: the largest round distance that fits in about a quarter of the width.
+  const scaleKm = [0.1, 0.2, 0.25, 0.5, 1, 2, 5, 10].filter((d) => d * k <= MAP_W / 4).pop() ?? 0.1;
+  const sw = scaleKm * k;
+  const scaleText = scaleKm < 1 ? `${scaleKm * 1000} m` : `${scaleKm} km`;
+  const scale = `<g class="scale" transform="translate(12 ${MAP_H - 12})"><path d="M0 -4V0H${sw.toFixed(1)}V-4"/>
+    <text x="${(sw + 6).toFixed(1)}" y="0">${scaleText}</text></g>`;
+
+  // Labels must not cover you, the scale bar or any other stop's dot.
+  const taken = [
+    [MAP_W / 2 - 9, MAP_H / 2 - 9, MAP_W / 2 + 9, MAP_H / 2 + 9],
+    [8, MAP_H - 22, 12 + sw + 10 + scaleText.length * 6, MAP_H - 4],
+    ...stops.map(({ name, p: [x, y], near: isNear }) => Object.assign([x - (isNear ? 7 : 6), y - (isNear ? 7 : 6), x + (isNear ? 7 : 6), y + (isNear ? 7 : 6)], { name })),
+  ];
   const label = ({ name, p: [x, y], near: isNear }) => {
     const w = name.length * (isNear ? 6.6 : 6) + 4;
     const h = 13;
@@ -249,14 +272,13 @@ function miniMap(here, near, stations) {
       const left = anchor === "start" ? lx : anchor === "end" ? lx - w : lx - w / 2;
       const box = [left, ly - h + 3, left + w, ly + 3];
       const clear = box[0] >= 2 && box[2] <= MAP_W - 2 && box[1] >= 2 && box[3] <= MAP_H - 2;
-      if (clear && !taken.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) {
+      if (clear && !taken.some((b) => b.name !== name && box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) {
         taken.push(box);
         return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" class="${isNear ? "is-near" : ""}">${esc(name)}</text>`;
       }
     }
     return "";
   };
-  taken.push([MAP_W / 2 - 9, MAP_H / 2 - 9, MAP_W / 2 + 9, MAP_H / 2 + 9]); // keep labels off "you"
 
   const dots = stops
     .map((s) => {
@@ -267,20 +289,103 @@ function miniMap(here, near, stations) {
     })
     .join("");
 
-  // Scale bar: the largest round distance that fits in about a quarter of the width.
-  const scaleKm = [0.1, 0.2, 0.25, 0.5, 1, 2].filter((d) => d * k <= MAP_W / 4).pop() ?? 0.1;
-  const sw = scaleKm * k;
-  const scale = `<g class="scale" transform="translate(12 ${MAP_H - 12})"><path d="M0 -4V0H${sw.toFixed(1)}V-4"/>
-    <text x="${(sw + 6).toFixed(1)}" y="0">${scaleKm < 1 ? `${scaleKm * 1000} m` : `${scaleKm} km`}</text></g>`;
-
   const you = `<g class="you" transform="translate(${MAP_W / 2} ${MAP_H / 2})"><circle r="14" class="you__halo"/><circle r="6"/></g>`;
 
   return `<figure class="map">
     <svg viewBox="0 0 ${MAP_W} ${MAP_H}" role="img" aria-label="Map of tram stops near you">
-      <g class="roads">${roads}</g><g class="tracks">${tracks}</g>${dots}${you}${scale}
+      ${roads}<g class="tracks">${tracks}</g>${dots}${you}${scale}
     </svg>
     <figcaption>© OpenStreetMap contributors · Contains TfGM data · © Crown copyright 2017</figcaption>
   </figure>`;
+}
+
+// More than FAR_KM from every stop: a map of your surroundings would be empty, so show the whole
+// network with an arrow towards you, which way and how far the nearest stop is, and directions to it.
+const FIT_YOU_KM = 60; // within this of the network's centre, the overview zooms out to include you
+const COMPASS = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
+function compass([lat1, lon1], [lat2, lon2]) {
+  const dx = (lon2 - lon1) * Math.cos((lat1 * Math.PI) / 180);
+  const dy = lat2 - lat1;
+  const deg = ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360;
+  return COMPASS[Math.round(deg / 45) % 8];
+}
+
+function farView(here, [nearest, km], stations) {
+  const stops = Object.entries(state.stops);
+  if (!stops.length) return "";
+  // Fit the network and, if you're not too far away, you as well; otherwise you get an arrow at the edge.
+  const netLats = stops.map(([, [lat]]) => lat);
+  const netLons = stops.map(([, [, lon]]) => lon);
+  const netCentre = [(Math.min(...netLats) + Math.max(...netLats)) / 2, (Math.min(...netLons) + Math.max(...netLons)) / 2];
+  const fitYou = distanceKm(here, netCentre) < FIT_YOU_KM;
+  const lats = fitYou ? [...netLats, here[0]] : netLats;
+  const lons = fitYou ? [...netLons, here[1]] : netLons;
+  const [latC, lonC] = [(Math.min(...lats) + Math.max(...lats)) / 2, (Math.min(...lons) + Math.max(...lons)) / 2];
+  const cos0 = Math.cos((latC * Math.PI) / 180);
+  const PAD = 30;
+  const spanX = (Math.max(...lons) - Math.min(...lons)) * 111.32 * cos0;
+  const spanY = (Math.max(...lats) - Math.min(...lats)) * 110.574;
+  const k = Math.min((MAP_W - 2 * PAD) / spanX, (MAP_H - 2 * PAD) / spanY);
+  const px = (lat, lon) => [MAP_W / 2 + (lon - lonC) * 111.32 * cos0 * k, MAP_H / 2 - (lat - latC) * 110.574 * k];
+
+  const tracks = state.tracks
+    .map((t) => `<path d="M${t.map(([lon, lat]) => px(lat, lon).map((v) => v.toFixed(1)).join(" ")).join("L")}"/>`)
+    .join("");
+  const dots = stops
+    .filter(([name]) => name !== nearest && stations.has(name))
+    .map(([name, [lat, lon]]) => {
+      const [x, y] = px(lat, lon);
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.2" class="stop stop--tiny" style="--c:${lineColour(stations.get(name)[0].Line)}"/>`;
+    })
+    .join("");
+
+  const [nx, ny] = px(...state.stops[nearest]);
+  const [ux, uy] = px(...here);
+
+  let you;
+  let towardsX; // where "you" sits horizontally, so the stop's label goes on the other side
+  if (fitYou) {
+    // You on the map, with a dashed line to the nearest stop and the distance halfway along it.
+    const len = Math.hypot(nx - ux, ny - uy) || 1;
+    const [ex, ey] = [(nx - ux) / len, (ny - uy) / len];
+    const [mx, my] = [(ux + nx) / 2, (uy + ny) / 2];
+    const [ox, oy] = [-ey * 12, ex * 12]; // nudge the distance off the line
+    you = `<path class="far__line" d="M${(ux + ex * 9).toFixed(1)} ${(uy + ey * 9).toFixed(1)}L${(nx - ex * 9).toFixed(1)} ${(ny - ey * 9).toFixed(1)}"/>
+      <text class="you__label" x="${(mx + ox).toFixed(1)}" y="${(my + oy + 4).toFixed(1)}" text-anchor="middle">${distanceText(km)}</text>
+      <g class="you" transform="translate(${ux.toFixed(1)} ${uy.toFixed(1)})"><circle r="10" class="you__halo"/><circle r="5"/></g>`;
+    towardsX = ux;
+  } else {
+    // Too far to fit: an arrow where the line from the network's centre towards you leaves the map.
+    const inset = 14;
+    const dx = ux - MAP_W / 2;
+    const dy = uy - MAP_H / 2;
+    const t = Math.min((MAP_W / 2 - inset) / Math.abs(dx || 1e-9), (MAP_H / 2 - inset) / Math.abs(dy || 1e-9));
+    const ex = MAP_W / 2 + dx * t;
+    const ey = MAP_H / 2 + dy * t;
+    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    const lx = ex - Math.cos((angle * Math.PI) / 180) * 18;
+    const ly = ey - Math.sin((angle * Math.PI) / 180) * 18;
+    const anchor = Math.abs(dx * t) > MAP_W / 2 - 60 ? (dx > 0 ? "end" : "start") : "middle";
+    you = `<g class="you"><path d="M0 -7L12 0L0 7Z" transform="translate(${ex.toFixed(1)} ${ey.toFixed(1)}) rotate(${angle.toFixed(1)}) translate(-12 0)"/>
+      <text x="${lx.toFixed(1)}" y="${(ly + 4).toFixed(1)}" text-anchor="${anchor}" class="you__label">You · ${distanceText(km)}</text></g>`;
+    towardsX = ex;
+  }
+
+  const nearAnchor = towardsX > nx ? "end" : "start";
+  const nearDot = `<a href="#/station/${encodeURIComponent(nearest)}"><title>${esc(nearest)}</title>
+    <circle cx="${nx.toFixed(1)}" cy="${ny.toFixed(1)}" r="6.5" class="stop" style="--c:${lineColour(stations.get(nearest)[0].Line)}"/>
+    <text x="${(nx + (nearAnchor === "end" ? -10 : 10)).toFixed(1)}" y="${(ny + 4).toFixed(1)}" text-anchor="${nearAnchor}" class="is-near">${esc(nearest)}</text></a>`;
+
+  const [slat, slon] = state.stops[nearest];
+  const directions = `https://www.google.com/maps/dir/?api=1&origin=${here[0]},${here[1]}&destination=${slat},${slon}&travelmode=transit`;
+  return `<figure class="map">
+    <svg viewBox="0 0 ${MAP_W} ${MAP_H}" role="img" aria-label="The Metrolink network, where you are, and the nearest stop">
+      <g class="tracks">${tracks}</g>${dots}${you}${nearDot}
+    </svg>
+    <figcaption>Contains TfGM data · © Crown copyright 2017</figcaption>
+  </figure>
+  <p class="far">You're ${distanceText(km)} from Metrolink. The nearest stop, <a href="#/station/${encodeURIComponent(nearest)}">${esc(nearest)}</a>, is ${compass(here, state.stops[nearest])} of you.
+    <a class="far__go" href="${directions}" target="_blank" rel="noopener">Directions to ${esc(nearest)} ↗</a></p>`;
 }
 
 const section = (title, rows) => (rows ? `<h2 class="section">${title}</h2><ul class="list">${rows}</ul>` : "");
@@ -305,7 +410,8 @@ function renderList() {
         .sort((a, b) => a[1] - b[1])
         .slice(0, NEAREST);
       const rows = near.map(([n, km]) => stopRow(n, stations.get(n), `<span class="dist">${distanceText(km)}</span>`)).join("");
-      html += `<h2 class="section">Nearest</h2>${miniMap(state.here, near, stations)}<ul class="list">${rows}</ul>`;
+      const far = near.length && near[0][1] > FAR_KM;
+      html += `<h2 class="section">Nearest</h2>${far ? farView(state.here, near[0], stations) : miniMap(state.here, near, stations)}<ul class="list">${rows}</ul>`;
     } else {
       html += `<button class="link" data-action="locate" ${state.locating ? "disabled" : ""}>${state.locating ? "Finding you…" : "Show nearest stops"}</button>`;
       if (state.locError) html += `<p class="muted note">${esc(state.locError)}</p>`;
@@ -422,32 +528,68 @@ async function load() {
   }
 }
 
-function locate() {
+// Once you've shared your location, the page finds you by itself on later visits.
+const LOCATE_KEY = "trams:locate";
+const rememberLocate = (on) => {
+  try {
+    on ? localStorage.setItem(LOCATE_KEY, "1") : localStorage.removeItem(LOCATE_KEY);
+  } catch {}
+};
+const wantsLocate = () => {
+  try {
+    return localStorage.getItem(LOCATE_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
+// quiet: update the position without showing "Finding you…" or errors (automatic refreshes).
+function locate({ quiet = false } = {}) {
   if (!navigator.geolocation) {
-    state.locError = "This browser can't share your location.";
+    if (!quiet) state.locError = "This browser can't share your location.";
     return render();
   }
+  if (state.locating) return;
   state.locating = true;
-  state.locError = null;
-  render();
+  if (!quiet) {
+    state.locError = null;
+    render();
+  }
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       state.here = [pos.coords.latitude, pos.coords.longitude];
       state.locating = false;
-      render();
+      rememberLocate(true);
+      if (!route()) render();
     },
     (err) => {
       state.locating = false;
+      if (err.code === err.PERMISSION_DENIED) {
+        rememberLocate(false);
+        state.here = null;
+      }
+      if (quiet && err.code !== err.PERMISSION_DENIED) return;
       state.locError =
         err.code === err.PERMISSION_DENIED
           ? "Location is blocked for this page."
           : window.isSecureContext
             ? "Couldn't find your location."
             : "Location needs https or localhost.";
-      render();
+      if (!route()) render();
     },
-    { timeout: 10_000, maximumAge: 60_000 },
+    { timeout: 10_000, maximumAge: 30_000 },
   );
+}
+
+// Find you without a tap if the browser already allows it, or you've opted in before
+// (and haven't since blocked it).
+async function autoLocate() {
+  let permission = "prompt";
+  try {
+    permission = (await navigator.permissions?.query({ name: "geolocation" }))?.state ?? "prompt";
+  } catch {}
+  if (permission === "denied") return rememberLocate(false);
+  if (permission === "granted" || wantsLocate()) locate({ quiet: true });
 }
 
 // ---------- events ----------
@@ -487,10 +629,14 @@ window.addEventListener("hashchange", () => {
 
 $("#refresh").addEventListener("click", load);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) load();
+  if (document.hidden) return;
+  load();
+  if (state.here) locate({ quiet: true });
 });
 setInterval(() => {
-  if (!document.hidden) load();
+  if (document.hidden) return;
+  load();
+  if (state.here) locate({ quiet: true });
 }, REFRESH_MS);
 
 // Stops and track geometry: TfGM's GM Metrolink Network data (OGL v3), see README.
@@ -504,3 +650,4 @@ fetch("network.json")
   .catch(() => {});
 render();
 load();
+autoLocate();

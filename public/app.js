@@ -14,6 +14,7 @@ const state = {
   query: "",
   favs: new Set(readFavs()),
   stops: {}, // name -> [lat, lon]
+  tracks: [], // [[lon, lat], ...] per track section
   here: null, // [lat, lon] once the user asks for nearest stops
   locating: false,
   locError: null,
@@ -152,6 +153,81 @@ function stopRow(name, platforms, extra = "") {
   </a></li>`;
 }
 
+// ---------- mini map: you, nearby stops and the track, drawn as SVG (no map tiles) ----------
+
+const MAP_W = 360;
+const MAP_H = 220;
+
+function miniMap(here, near, stations) {
+  if (!near.length) return "";
+  const [lat0, lon0] = here;
+  // Show at least the nearest stops, but stay between 400 m and 3 km across half the height.
+  const radiusKm = Math.min(3, Math.max(0.4, near[near.length - 1][1] * 1.3));
+  const k = MAP_H / 2 / radiusKm; // px per km
+  const cos0 = Math.cos((lat0 * Math.PI) / 180);
+  const px = (lat, lon) => [MAP_W / 2 + (lon - lon0) * 111.32 * cos0 * k, MAP_H / 2 - (lat - lat0) * 110.574 * k];
+  const inside = ([x, y], m = 0) => x >= -m && x <= MAP_W + m && y >= -m && y <= MAP_H + m;
+
+  const tracks = state.tracks
+    .map((t) => t.map(([lon, lat]) => px(lat, lon)))
+    .filter((pts) => pts.some((p) => inside(p, 60)))
+    .map((pts) => `<path d="M${pts.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join("L")}"/>`)
+    .join("");
+
+  const nearSet = new Set(near.map(([n]) => n));
+  const stops = Object.entries(state.stops)
+    .map(([name, [lat, lon]]) => ({ name, p: px(lat, lon), near: nearSet.has(name) }))
+    .filter((s) => inside(s.p, 8) && stations.has(s.name))
+    // Label the nearest stops first so they win any overlap.
+    .sort((a, b) => b.near - a.near);
+
+  const taken = [];
+  const label = ({ name, p: [x, y], near: isNear }) => {
+    const w = name.length * (isNear ? 6.6 : 6) + 4;
+    const h = 13;
+    for (const [lx, ly, anchor] of [
+      [x + 9, y + 4, "start"],
+      [x - 9, y + 4, "end"],
+      [x, y - 10, "middle"],
+      [x, y + 18, "middle"],
+    ]) {
+      const left = anchor === "start" ? lx : anchor === "end" ? lx - w : lx - w / 2;
+      const box = [left, ly - h + 3, left + w, ly + 3];
+      const clear = box[0] >= 2 && box[2] <= MAP_W - 2 && box[1] >= 2 && box[3] <= MAP_H - 2;
+      if (clear && !taken.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) {
+        taken.push(box);
+        return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" class="${isNear ? "is-near" : ""}">${esc(name)}</text>`;
+      }
+    }
+    return "";
+  };
+  taken.push([MAP_W / 2 - 9, MAP_H / 2 - 9, MAP_W / 2 + 9, MAP_H / 2 + 9]); // keep labels off "you"
+
+  const dots = stops
+    .map((s) => {
+      const colour = lineColour(stations.get(s.name)[0].Line);
+      const [x, y] = s.p;
+      return `<a href="#/station/${encodeURIComponent(s.name)}"><title>${esc(s.name)}</title>
+        <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${s.near ? 6.5 : 5}" style="--c:${colour}" class="stop"/>${label(s)}</a>`;
+    })
+    .join("");
+
+  // Scale bar: the largest round distance that fits in about a quarter of the width.
+  const scaleKm = [0.1, 0.2, 0.25, 0.5, 1, 2].filter((d) => d * k <= MAP_W / 4).pop() ?? 0.1;
+  const sw = scaleKm * k;
+  const scale = `<g class="scale" transform="translate(12 ${MAP_H - 12})"><path d="M0 -4V0H${sw.toFixed(1)}V-4"/>
+    <text x="${(sw + 6).toFixed(1)}" y="0">${scaleKm < 1 ? `${scaleKm * 1000} m` : `${scaleKm} km`}</text></g>`;
+
+  const you = `<g class="you" transform="translate(${MAP_W / 2} ${MAP_H / 2})"><circle r="14" class="you__halo"/><circle r="6"/></g>`;
+
+  return `<figure class="map">
+    <svg viewBox="0 0 ${MAP_W} ${MAP_H}" role="img" aria-label="Map of tram stops near you">
+      <g class="tracks">${tracks}</g>${dots}${you}${scale}
+    </svg>
+    <figcaption>Contains TfGM data · © Crown copyright 2017</figcaption>
+  </figure>`;
+}
+
 const section = (title, rows) => (rows ? `<h2 class="section">${title}</h2><ul class="list">${rows}</ul>` : "");
 
 function renderList() {
@@ -173,7 +249,8 @@ function renderList() {
         .map((n) => [n, distanceKm(state.here, state.stops[n])])
         .sort((a, b) => a[1] - b[1])
         .slice(0, NEAREST);
-      html += section("Nearest", near.map(([n, km]) => stopRow(n, stations.get(n), `<span class="dist">${distanceText(km)}</span>`)).join(""));
+      const rows = near.map(([n, km]) => stopRow(n, stations.get(n), `<span class="dist">${distanceText(km)}</span>`)).join("");
+      html += `<h2 class="section">Nearest</h2>${miniMap(state.here, near, stations)}<ul class="list">${rows}</ul>`;
     } else {
       html += `<button class="link" data-action="locate" ${state.locating ? "disabled" : ""}>${state.locating ? "Finding you…" : "Show nearest stops"}</button>`;
       if (state.locError) html += `<p class="muted note">${esc(state.locError)}</p>`;
@@ -361,9 +438,14 @@ setInterval(() => {
   if (!document.hidden) load();
 }, REFRESH_MS);
 
-fetch("stops.json")
+// Stops and track geometry: TfGM's GM Metrolink Network data (OGL v3), see README.
+fetch("network.json")
   .then((r) => r.json())
-  .then((stops) => (state.stops = stops))
+  .then((net) => {
+    state.stops = net.stops;
+    state.tracks = net.tracks;
+    if (state.here) render();
+  })
   .catch(() => {});
 render();
 load();

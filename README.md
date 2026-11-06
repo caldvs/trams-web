@@ -34,6 +34,10 @@ A copy is stored as the `TFGM_KEY` Actions secret in `caldvs/metrolink-performan
   - strips the signs' control codes (`^F0`, `^J`) from notices, and hides the standing "Welcome to Metrolink" notice
   - warns when TfGM's own timestamp is over 3 minutes old
   - keeps saved stops in this browser (`localStorage`)
-  - can show the 3 stops nearest to you
-- `public/stops.json` maps each stop to coordinates, from DfT's NaPTAN data (Metrolink is area code 940), matched on the feed's `AtcoCode`. Rebuild it if stops are added.
+  - can show the 3 stops nearest to you, with a small map drawn as SVG (no map tiles): you, nearby stops in their area's colour, the track and a scale bar. Tapping a stop opens it.
+- `public/network.json` holds each stop's coordinates and simplified track geometry. It comes from TfGM's [GM Metrolink Network](https://www.data.gov.uk/dataset/55576216-cd1d-4e2b-adcf-c87c07473373/gm-metrolink-network) data (June 2026, the GeoJSON in `GM_Metrolink_MapData.zip`). Stops are matched to the live feed on `stationCode` = `TLAREF`, and by name for Deansgate - Castlefield (`GMX` in the feed). Tracks are simplified to within 4 m (6,724 points down to 654). Rebuild it when TfGM publishes a new network.
+
+## Licence
+
+Network data: Contains Transport for Greater Manchester data. Contains OS data © Crown copyright and database right 2017. Used under the [Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/).
 - TfGM's `Line` field is one value per stop (the area of the network), not the route of each tram, so it's shown once per stop.

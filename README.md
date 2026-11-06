@@ -38,6 +38,12 @@ A copy is stored as the `TFGM_KEY` Actions secret in `caldvs/metrolink-performan
     - The map covers 1 km around you. If the nearest stop is further, it zooms out just enough to include it, using main roads only beyond 2.5 km.
     - More than 10 km from every stop, it shows the whole network instead: you and a dashed line to the nearest stop, or an arrow at the edge if you're over 60 km away. It also says which way the stop is, with a link to directions on Google Maps.
     - After you share your location once, the page finds you by itself on later visits (or straight away if the browser already allows it) and updates your position every 30 s while the tab is open.
+- `#/map` (the Map button) is a live map of the whole network you can pan and zoom, with trams moving along the track. TfGM publishes no tram locations, so `public/live.js` works them out from the departure boards:
+  - it builds a graph of the network from TfGM's track sections (which stops are next to each other, the track between them, and which turns a tram can make at junctions);
+  - "Eccles, 2 min" at a stop means a tram about 2 minutes back along the line it arrives on. Each tram is placed only between the stop it has just passed and its next stop, so it isn't counted on every board ahead of it;
+  - travel time between stops comes from the boards themselves (the same tram's wait at neighbouring stops), or from the track length;
+  - boards keep showing "Departing" long after the last tram has gone, so a tram is only shown at a stop if the next stop's board also lists it;
+  - between refreshes each tram glides towards where it should be by its arrival time. Tap one to see where it's going and its next stop.
 - The server gzips text over 1 KB, so a live refresh is about 8 KB instead of 145 KB.
 
 ## Map data

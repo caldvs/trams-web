@@ -34,6 +34,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0 auto;
@@ -160,3 +161,61 @@ body {
 .map .roads--wide .road--1 { stroke-width: 2.1; }
 .map .roads--wide .road--0 { stroke-width: 2.6; }
 .map .far__line { fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-dasharray: 4 4; stroke-linecap: round; }
+
+/* ---------- live map (#/map) ---------- */
+.bar { grid-template-columns: 1fr auto auto; }
+.refresh { grid-column: 3; }
+.maplink {
+  grid-column: 2; grid-row: 2; align-self: center;
+  padding: 9px 14px; border-radius: 20px; background: var(--card);
+  color: var(--accent); font-weight: 600; text-decoration: none;
+}
+body.is-map { max-width: none; }
+body.is-map .updated { display: none; }
+.livemap { position: relative; }
+.livemap__svg {
+  display: block; width: 100%; height: calc(100vh - 150px - env(safe-area-inset-top)); min-height: 320px;
+  background: var(--card); border-radius: 14px; touch-action: none; cursor: grab; user-select: none;
+}
+.livemap__svg:active { cursor: grabbing; }
+.livemap__svg path, .livemap__svg .road { vector-effect: non-scaling-stroke; }
+.lm-roads .road { fill: none; stroke: var(--road); stroke-linecap: round; stroke-linejoin: round; }
+.lm-roads .road--6 { stroke-width: 1; stroke-dasharray: 2 2; }
+.lm-roads .road--5 { stroke-width: 1.2; }
+.lm-roads .road--4 { stroke-width: 1.8; }
+.lm-roads .road--3 { stroke-width: 2.2; }
+.lm-roads .road--2 { stroke-width: 2.6; stroke: var(--road-major); }
+.lm-roads .road--1 { stroke-width: 3; stroke: var(--road-major); }
+.lm-roads .road--0 { stroke-width: 3.4; stroke: var(--road-major); }
+.lm-tracks path { fill: none; stroke: var(--track); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; opacity: 0.85; }
+.lm-stop circle { fill: var(--card); stroke: var(--c); stroke-width: 2.5; }
+.lm-stop:hover circle, .lm-stop:focus circle { fill: var(--c); }
+.lm-stop text {
+  display: none; font-size: 11px; fill: var(--text);
+  paint-order: stroke; stroke: var(--card); stroke-width: 3px; stroke-linejoin: round;
+}
+.is-labelled .lm-stop text { display: inline; }
+.lm-tram { cursor: pointer; transition: opacity 0.6s; }
+.lm-tram.is-new { opacity: 0; }
+.lm-tram rect, .lm-tram path { fill: var(--c); stroke: var(--card); stroke-width: 1.2px; vector-effect: none; }
+.lm-tram.is-selected rect { stroke: var(--text); stroke-width: 2px; }
+.lm-me circle { fill: var(--accent); stroke: var(--card); stroke-width: 2.5px; }
+.lm-me .you__halo { fill: var(--accent); fill-opacity: 0.18; stroke: none; }
+.livemap__controls { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; gap: 6px; }
+.livemap__controls button {
+  min-width: 40px; height: 40px; padding: 0 10px; border: 0; border-radius: 10px;
+  background: var(--bg); color: var(--accent); font: inherit; font-size: 20px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+.livemap__controls .livemap__me { font-size: 14px; }
+.livemap__status {
+  position: absolute; left: 10px; top: 10px; margin: 0; padding: 4px 10px; border-radius: 10px;
+  background: var(--bg); color: var(--muted); font-size: 13px; box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+}
+.livemap__status:empty { display: none; }
+.livemap__info {
+  display: grid; gap: 2px; margin: 8px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--card);
+}
+.livemap__info b { font-size: 17px; border-left: 4px solid var(--c); padding-left: 8px; }
+.livemap__info a { color: var(--accent); text-decoration: none; font-weight: 600; margin-top: 4px; }
+.livemap__note { margin: 6px 4px 0; color: var(--muted); font-size: 11px; }

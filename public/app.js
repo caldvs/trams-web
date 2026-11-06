@@ -1,4 +1,6 @@
 // Web port of the trams iOS app: stop list -> stop detail, from /api/metrolinks.
+import { createLiveMap } from "./map-view.js";
+
 const REFRESH_MS = 30_000;
 const OLD_DATA_MS = 3 * 60_000; // warn when TfGM's own timestamp is older than this
 const NEAREST = 3;
@@ -15,6 +17,7 @@ const state = {
   favs: new Set(readFavs()),
   stops: {}, // name -> [lat, lon]
   tracks: [], // [[lon, lat], ...] per track section
+  net: null, // network.json, for the live map
   here: null, // [lat, lon] once the user asks for nearest stops
   locating: false,
   locError: null,
@@ -485,18 +488,47 @@ function route() {
   const m = location.hash.match(/^#\/station\/(.+)$/);
   return m ? decodeURIComponent(m[1]) : null;
 }
+const onMap = () => location.hash === "#/map";
+
+// ---------- live map page ----------
+
+let liveMap = null;
+function colourFor(name) {
+  const stations = byStation();
+  const key = norm(name);
+  for (const [n, rows] of stations) if (norm(n) === key) return lineColour(rows[0].Line);
+  return "#8e8e93";
+}
+function renderMap() {
+  if (!state.net) return (app.innerHTML = `<p class="empty">Loading map…</p>`);
+  if (!liveMap) {
+    app.innerHTML = "";
+    liveMap = createLiveMap(app, { net: state.net, colourFor });
+  }
+  liveMap.update(state.rows);
+  liveMap.setHere(state.here);
+}
 
 function render() {
   const station = route();
-  $("#title").textContent = station ?? "Metrolink";
-  document.title = station ? `${station} · Trams` : "Trams";
-  $(".back").hidden = !station;
+  const map = onMap();
+  $("#title").textContent = station ?? (map ? "Live map" : "Metrolink");
+  document.title = station ? `${station} · Trams` : map ? "Live map · Trams" : "Trams";
+  $(".back").hidden = !station && !map;
+  $("#maplink").hidden = map;
+  document.body.classList.toggle("is-map", map);
+  if (!map && liveMap) {
+    liveMap.destroy();
+    liveMap = null;
+  }
   $("#refresh").classList.toggle("spin", state.loading);
 
   if (state.error && !state.rows.length) {
     app.innerHTML = `<div class="empty"><p>${esc(state.error)}</p><button class="btn" data-action="retry">Retry</button></div>`;
   } else if (!state.rows.length) {
     app.innerHTML = `<p class="empty">Loading stops…</p>`;
+  } else if (map) {
+    renderMap();
   } else if (station) {
     renderStation(station);
   } else {
@@ -560,7 +592,8 @@ function locate({ quiet = false } = {}) {
       state.here = [pos.coords.latitude, pos.coords.longitude];
       state.locating = false;
       rememberLocate(true);
-      if (!route()) render();
+      if (onMap()) liveMap?.setHere(state.here);
+      else if (!route()) render();
     },
     (err) => {
       state.locating = false;
@@ -620,6 +653,8 @@ window.addEventListener("hashchange", () => {
   }
   const back = lastRoute && !next ? state.listScroll : null;
   lastRoute = next;
+  liveMap?.destroy();
+  liveMap = null;
   app.innerHTML = "";
   render();
   if (!back) return window.scrollTo(0, 0);
@@ -645,7 +680,8 @@ fetch("network.json")
   .then((net) => {
     state.stops = net.stops;
     state.tracks = net.tracks;
-    if (state.here) render();
+    state.net = net;
+    if (state.here || onMap()) render();
   })
   .catch(() => {});
 render();

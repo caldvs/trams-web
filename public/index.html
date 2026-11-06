@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <title>Trams</title>
+  <link rel="icon" href="tram.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <a class="back" href="#/" hidden>‹ Stations</a>
+    <h1 id="title">Metrolink</h1>
+    <button id="refresh" class="refresh" aria-label="Refresh">↻</button>
+  </header>
+  <div id="demo" class="demo" hidden>Sample data. Set <code>TFGM_API_KEY</code> for live times.</div>
+  <main id="app"></main>
+  <footer id="updated" class="updated" role="status" aria-live="polite"></footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
